@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="vi">
+    <head>
+        <meta charset="utf-8" />
+        <title>Stylize Tester (SDXL-Turbo, presets)</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <style>
+            :root {
+                --bg: #0b0e11;
+                --card: #10151b;
+                --muted: #9aa4b2;
+                --fg: #e6e8eb;
+                --b: #212a36;
+                --accent: #2f6feb;
+            }
+            body {
+                font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu,
+                    "Helvetica Neue", Arial;
+                padding: 24px;
+                max-width: 1100px;
+                margin: auto;
+                background: var(--bg);
+                color: var(--fg);
+            }
+            h1 {
+                font-size: 22px;
+                margin: 0 0 16px;
+            }
+            .card {
+                background: var(--card);
+                border: 1px solid var(--b);
+                border-radius: 14px;
+                padding: 16px;
+                margin-bottom: 16px;
+            }
+            label {
+                display: block;
+                margin: 8px 0 6px;
+                color: #aab2bd;
+            }
+            input,
+            select,
+            button {
+                width: 100%;
+                padding: 10px;
+                border-radius: 10px;
+                border: 1px solid var(--b);
+                background: #0f141a;
+                color: var(--fg);
+            }
+            button {
+                cursor: pointer;
+                font-weight: 600;
+            }
+            .row {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 12px;
+            }
+            .row3 {
+                display: grid;
+                grid-template-columns: 1fr 1fr 1fr;
+                gap: 12px;
+            }
+            img {
+                max-width: 100%;
+                border-radius: 12px;
+                border: 1px solid var(--b);
+                background: #0a0d11;
+            }
+            .muted {
+                color: var(--muted);
+                font-size: 12px;
+            }
+            .pill {
+                display: inline-block;
+                background: #121a24;
+                border: 1px solid var(--b);
+                border-radius: 999px;
+                padding: 4px 10px;
+                margin-left: 8px;
+                font-size: 12px;
+            }
+            .out {
+                white-space: pre-wrap;
+                background: #0a0d11;
+                border: 1px dashed var(--b);
+                border-radius: 10px;
+                padding: 10px;
+                font-family: ui-monospace, Menlo, Consolas, monospace;
+                max-height: 320px;
+                overflow: auto;
+            }
+            .grid2 {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 16px;
+            }
+            .hint {
+                margin-top: 6px;
+            }
+            .badge {
+                display: inline-block;
+                padding: 2px 8px;
+                border-radius: 999px;
+                font-size: 12px;
+                border: 1px solid var(--b);
+                background: #131a22;
+                color: #b8c2cc;
+                margin-right: 6px;
+            }
+            .sep {
+                height: 1px;
+                background: var(--b);
+                margin: 12px 0;
+            }
+            .samples button {
+                width: auto;
+                margin-right: 8px;
+                margin-bottom: 8px;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>SDXL-Turbo Stylize — Web Tester (Presets + Recommended)</h1>
+
+        <div class="card">
+            <div class="row">
+                <div>
+                    <label>Backend Base URL</label>
+                    <input
+                        id="base"
+                        placeholder="http://localhost:8080"
+                        value="http://localhost:8080"
+                    />
+                </div>
+                <div>
+                    <label>API Key</label>
+                    <input id="apikey" placeholder="YOUR_API_KEY" />
+                </div>
+            </div>
+
+            <label>Image URL (public jpg/png ≤ ~1024px)</label>
+            <input
+                id="imgurl"
+                placeholder="https://images.pexels.com/photos/2693529/pexels-photo-2693529.jpeg"
+            />
+
+            <div class="samples muted">
+                Ảnh mẫu:
+                <span class="badge">mèo</span>
+                <button
+                    data-u="https://images.pexels.com/photos/1170986/pexels-photo-1170986.jpeg"
+                >
+                    Cat
+                </button>
+                <span class="badge">đồ vật</span>
+                <button
+                    data-u="https://images.pexels.com/photos/51383/camera-old-antique-photos-51383.jpeg"
+                >
+                    Camera
+                </button>
+                <span class="badge">chân dung</span>
+                <button
+                    data-u="https://images.pexels.com/photos/1704488/pexels-photo-1704488.jpeg"
+                >
+                    Portrait
+                </button>
+            </div>
+            <div class="sep"></div>
+
+            <div class="row">
+                <div>
+                    <label>Style</label>
+                    <select id="style"></select>
+                    <div class="hint muted" id="styleHint"></div>
+                </div>
+                <div>
+                    <label>
+                        <input type="checkbox" id="useRec" checked />
+                        Use recommended params for selected style
+                    </label>
+                    <div class="muted">
+                        Grade-only: giữ nội dung (chỉ đổi màu/độ tương phản).
+                        Paint-over: đổi chất liệu nhẹ, vẫn giữ silhouette.
+                    </div>
+                </div>
+            </div>
+
+            <div class="row3">
+                <div>
+                    <label>Strength</label>
+                    <input
+                        id="strength"
+                        type="number"
+                        step="0.01"
+                        min="0.1"
+                        max="0.8"
+                        value="0.30"
+                    />
+                </div>
+                <div>
+                    <label>Steps</label>
+                    <input
+                        id="steps"
+                        type="number"
+                        min="2"
+                        max="12"
+                        value="4"
+                    />
+                </div>
+                <div>
+                    <label>CFG</label>
+                    <input
+                        id="cfg"
+                        type="number"
+                        step="0.1"
+                        min="0.5"
+                        max="3.0"
+                        value="1.5"
+                    />
+                </div>
+            </div>
+
+            <div class="hint muted">
+                Khuyến nghị: Grade-only → strength 0.18–0.30, cfg 1.1–1.6, steps
+                4–6. Paint-over → strength 0.35–0.55.
+            </div>
+
+            <div style="margin-top: 12px">
+                <button id="run">Run Stylize</button>
+                <span class="pill" id="status">Idle</span>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="grid2">
+                <div>
+                    <label>Preview (Input)</label>
+                    <img id="preview" alt="preview" />
+                </div>
+                <div>
+                    <label>Kết quả</label>
+                    <img id="result" alt="result" />
+                </div>
+            </div>
+            <label>Raw response</label>
+            <div id="raw" class="out"></div>
+        </div>
+
+        <script>
+            // Presets khớp backend (rút gọn phần prompt/negative — server mới quan trọng)
+            const PRESETS = {
+                // ----- GRADE-ONLY -----
+                cinematic: {
+                    group: "Grade-only",
+                    recommended: { strength: 0.22, cfg: 1.3, steps: 4 },
+                },
+                teal_orange: {
+                    group: "Grade-only",
+                    recommended: { strength: 0.22, cfg: 1.3, steps: 4 },
+                },
+                vintage_film: {
+                    group: "Grade-only",
+                    recommended: { strength: 0.24, cfg: 1.3, steps: 4 },
+                },
+                bw_matte: {
+                    group: "Grade-only",
+                    recommended: { strength: 0.2, cfg: 1.2, steps: 4 },
+                },
+                hdr_pop: {
+                    group: "Grade-only",
+                    recommended: { strength: 0.24, cfg: 1.4, steps: 4 },
+                },
+                // ----- PAINT-OVER -----
+                watercolor: {
+                    group: "Paint-over",
+                    recommended: { strength: 0.38, cfg: 1.4, steps: 5 },
+                },
+                anime_soft: {
+                    group: "Paint-over",
+                    recommended: { strength: 0.42, cfg: 1.5, steps: 5 },
+                },
+            };
+
+            const $ = (id) => document.getElementById(id);
+
+            // populate style options grouped
+            (function initStyles() {
+                const sel = $("style");
+                const groups = {};
+                for (const [k, v] of Object.entries(PRESETS)) {
+                    if (!groups[v.group]) {
+                        const og = document.createElement("optgroup");
+                        og.label = v.group;
+                        groups[v.group] = og;
+                        sel.appendChild(og);
+                    }
+                    const opt = document.createElement("option");
+                    opt.value = k;
+                    opt.textContent = k;
+                    groups[v.group].appendChild(opt);
+                }
+                sel.value = "cinematic";
+                updateRecommended();
+            })();
+
+            // Samples
+            document.querySelectorAll(".samples button").forEach((btn) => {
+                btn.onclick = () => {
+                    $("imgurl").value = btn.dataset.u;
+                    $("preview").src = btn.dataset.u;
+                };
+            });
+
+            $("imgurl").addEventListener(
+                "input",
+                (e) => ($("preview").src = e.target.value)
+            );
+            $("preview").src = $("imgurl").value;
+
+            function applyRec(rec) {
+                $("strength").value = rec.strength;
+                $("cfg").value = rec.cfg;
+                $("steps").value = rec.steps;
+            }
+            function setInputsDisabled(dis) {
+                ["strength", "cfg", "steps"].forEach(
+                    (id) => ($(id).disabled = dis)
+                );
+            }
+            function updateRecommended() {
+                const style = $("style").value;
+                const rec = PRESETS[style].recommended;
+                $("styleHint").textContent =
+                    PRESETS[style].group +
+                    " – recommended: " +
+                    `strength ${rec.strength} • cfg ${rec.cfg} • steps ${rec.steps}`;
+                if ($("useRec").checked) {
+                    applyRec(rec);
+                    setInputsDisabled(true);
+                } else {
+                    setInputsDisabled(false);
+                }
+            }
+            $("style").onchange = updateRecommended;
+            $("useRec").onchange = updateRecommended;
+
+            $("run").onclick = async () => {
+                const base = $("base").value.trim().replace(/\/+$/, "");
+                const apikey = $("apikey").value.trim();
+                const style = $("style").value;
+
+                const body = {
+                    image_url: $("imgurl").value.trim(),
+                    style,
+                    strength: parseFloat($("strength").value),
+                    steps: parseInt($("steps").value, 10),
+                    cfg: parseFloat($("cfg").value),
+                    negative_prompt: null, // server dùng preset Negative; để null ở client
+                };
+
+                $("status").textContent = "Running...";
+                $("result").src = "";
+                $("raw").textContent = "";
+
+                try {
+                    const t0 = performance.now();
+                    const res = await fetch(base + "/inference/stylize", {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json",
+                            "X-API-Key": apikey,
+                        },
+                        body: JSON.stringify(body),
+                    });
+                    const t1 = performance.now();
+                    const txt = await res.text();
+                    let json;
+                    try {
+                        json = JSON.parse(txt);
+                    } catch {
+                        json = { raw: txt };
+                    }
+
+                    $("raw").textContent = JSON.stringify(
+                        {
+                            status: res.status,
+                            ms: Math.round(t1 - t0),
+                            ...json,
+                        },
+                        null,
+                        2
+                    );
+                    if (!res.ok || !json.output_url) {
+                        $("status").textContent = "Error";
+                        return;
+                    }
+                    $("result").src = json.output_url;
+                    $("status").textContent = "Done";
+                } catch (e) {
+                    $("raw").textContent = String(e);
+                    $("status").textContent = "Failed";
+                }
+            };
+        </script>
+    </body>
+</html>

@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+pydantic==2.*
+boto3
+botocore
+python-dotenv
+slowapi
+limits
+pyjwt
+python-dotenv
+httpx
