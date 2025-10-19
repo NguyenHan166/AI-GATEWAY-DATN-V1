@@ -99,3 +99,21 @@ def get_or_put_cached(
             data, key=key, content_type=content_type, metadata=metadata
         )
         return url, key, False
+
+
+def make_inference_key_from_bytes(
+    *,
+    task: str,
+    image_bytes: bytes,
+    params: dict | None,
+    ext: str = "png",
+) -> str:
+    """Key cache ổn định dựa trên hash ảnh + tham số."""
+    import hashlib, json
+    from datetime import datetime, timezone
+
+    img_digest = hashlib.sha256(image_bytes).hexdigest()[:16]
+    payload = {"task": task, "img": img_digest, "params": params or {}}
+    digest = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
+    prefix = datetime.now(timezone.utc).strftime("%Y/%m/%d")
+    return f"inference/{task}/{prefix}/{img_digest}/{digest[:16]}.{ext}"

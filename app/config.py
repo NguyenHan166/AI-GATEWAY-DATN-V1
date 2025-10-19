@@ -1,7 +1,7 @@
 from dotenv import load_dotenv, find_dotenv
+import os
 
 load_dotenv(find_dotenv(), encoding="utf-8")
-import os
 
 
 def require_env(name: str) -> str:
@@ -11,6 +11,7 @@ def require_env(name: str) -> str:
     return v
 
 
+# Cloudflare R2
 CF_R2_ACCOUNT_ID = require_env("CF_R2_ACCOUNT_ID")
 CF_R2_BUCKET = require_env("CF_R2_BUCKET")
 CF_R2_ACCESS_KEY_ID = require_env("CF_R2_ACCESS_KEY_ID")
@@ -20,6 +21,7 @@ CF_R2_ENDPOINT = (
     or f"https://{CF_R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 )
 
+# API
 API_KEY = os.getenv("API_KEY", "").strip()
 ALLOWED_ORIGINS = [s.strip() for s in os.getenv("ALLOWED_ORIGINS", "*").split(",")]
 
@@ -30,12 +32,12 @@ INDEXED_PREFIXES = [
 ]
 MANIFEST_CACHE_TTL_SECONDS = int(os.getenv("MANIFEST_CACHE_TTL_SECONDS", "300"))
 PRESIGN_EXPIRES_SECONDS = int(os.getenv("PRESIGN_EXPIRES_SECONDS", "900"))
+STYLE_MAX_SIDE = int(os.getenv("STYLE_MAX_SIDE", "1024"))
 
-HF_ENDPOINT_URL_STYLIZE = os.getenv("HF_ENDPOINT_URL_STYLIZE")
+# Hugging Face
+HF_ENDPOINT_URL_RESTORE = os.getenv("HF_ENDPOINT_URL_RESTORE")
 HF_TOKEN = os.getenv("HF_TOKEN")
 INFERENCE_TIMEOUT_SEC = int(os.getenv("INFERENCE_TIMEOUT_SEC", "90"))
-
-STYLE_MAX_SIDE = int(os.getenv("STYLE_MAX_SIDE", "1024"))
 
 # an toàn: các extension hợp lệ
 ALLOWED_EXTS = {".xmp", ".cube", ".onpreset", ".onpreset.zip"}

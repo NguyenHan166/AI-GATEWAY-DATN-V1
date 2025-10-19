@@ -1,8 +1,9 @@
+import math
 import os, time
 from pathlib import PurePosixPath
 from typing import Dict, List
-from .config import INDEXED_PREFIXES, ALLOWED_EXTS, MANIFEST_CACHE_TTL_SECONDS
-from .storage import list_objects, head_object
+from ..config import INDEXED_PREFIXES, ALLOWED_EXTS, MANIFEST_CACHE_TTL_SECONDS
+from ..storage import list_objects, head_object
 
 # cache đơn giản trong memory
 _cache_manifest = None
@@ -107,3 +108,25 @@ def get_manifest_cached() -> Dict:
     Nếu bạn muốn SHA256 chính xác, hãy chạy một script tính sha256 và lưu vào DB hoặc user-metadata của object (ví dụ x-amz-meta-sha256), 
     rồi sửa build_manifest() đọc metadata đó (gọi head_object(key) để lấy).
     """
+
+
+def filter_packs(data: dict, category: str | None, target: str | None) -> list[dict]:
+    """Lọc danh sách packs theo category/target (case-sensitive để khớp path)."""
+    packs = data.get("packs", [])
+    if category:
+        packs = [p for p in packs if p.get("category") == category]
+    if target:
+        packs = [p for p in packs if p.get("target") == target]
+    return packs
+
+
+def paginate(items: list, page: int, page_size: int) -> tuple[list, int, int, int]:
+    """Trả (items_page, total, page, total_pages). Page bắt đầu từ 1."""
+    total = len(items)
+    if page_size <= 0:
+        page_size = 50
+    total_pages = max(1, math.ceil(total / page_size)) if total else 1
+    page = max(1, min(page, total_pages))
+    start = (page - 1) * page_size
+    end = start + page_size
+    return items[start:end], total, page, total_pages

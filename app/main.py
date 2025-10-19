@@ -1,4 +1,13 @@
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Depends,
+    Request,
+    Query,
+    UploadFile,
+    File,
+    Form,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
@@ -15,11 +24,16 @@ from .models import (
     PresignResp,
     StylizeReq,
     StylizeResp,
+    ManifestPaged,
+    RestoreResp,
 )
-from .storage import presign_get, get_or_put_cached, make_inference_key
+from .storage import presign_get, get_or_put_cached, make_inference_key_from_bytes
 from .security import require_api_key
-from .manifest_service import get_manifest_cached
-from .inference_service import call_sdxl_turbo
+from .ai_service.manifest_service import get_manifest_cached, filter_packs, paginate
+from .ai_service.inference_service import (
+    call_restore_from_bytes,
+    InferenceError,
+)
 
 limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="Filters Backend (Cloudflare R2)")
@@ -57,11 +71,39 @@ async def debug_ls():
 from .security import require_api_key
 
 
-@app.get("/manifest", response_model=Manifest)
+@app.get("/manifest", response_model=ManifestPaged)  # đổi response_model
 @limiter.limit("30/minute")
-async def get_manifest(request: Request, authorized=Depends(require_api_key)):
-    data = get_manifest_cached()
-    return Manifest(**data)
+async def get_manifest(
+    request: Request,
+    authorized=Depends(
+        require_api_key
+    ),  # hoặc optional_user nếu bạn vẫn muốn cho public
+    category: str | None = Query(None),
+    target: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=500),  # giới hạn an toàn
+):
+    """
+    Trả manifest đã lọc theo category/target, có phân trang packs.
+    Ví dụ:
+      /manifest?category=ON1_BW_LUTs&target=For_Lightroom&page=1&page_size=20
+    """
+    data = get_manifest_cached()  # {'version': '...', 'packs': [...]}
+
+    filtered = filter_packs(data, category, target)
+    page_items, total, page, total_pages = paginate(filtered, page, page_size)
+
+    # ép kiểu về Pack cho đúng pydantic (Pack trong models.py)
+    packs_model = [Pack(**p) for p in page_items]
+
+    return ManifestPaged(
+        version=data.get("version", "unknown"),
+        packs=packs_model,
+        total_packs=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+    )
 
 
 @app.post("/presign", response_model=PresignResp)
@@ -104,38 +146,82 @@ async def presign(
     """
 
 
-# ---- Inference: stylize ----
-@app.post("/inference/stylize", response_model=StylizeResp)
+# ---- Inference: Restore (multipart upload) ----
+@app.post("/inference/restore", response_model=RestoreResp)
 @limiter.limit("30/minute")
-async def stylize(
-    request: Request, req: StylizeReq, authorized=Depends(require_api_key)
+async def restore_multipart(
+    request: Request,
+    authorized=Depends(require_api_key),
+    image: UploadFile = File(..., description="Ảnh upload từ client (jpg/png/webp)"),
+    task: str = Form("upscale+face_restore"),
+    upscale: int = Form(4),
+    tile: int = Form(0),
+    codeformer_fidelity: float = Form(0.5),
+    background_enhance: bool = Form(True),
+    face_upsample: bool = Form(True),
 ):
-    # Giới hạn hợp lý: phía client nên resize về <= STYLE_MAX_SIDE trước khi upload R2
-    # (Ở đây ta không tải ảnh về để kiểm; tin client để tiết kiệm tài nguyên.)
+    """
+    Nâng cấp & khôi phục ảnh: Real-ESRGAN (upscale) + CodeFormer (face restore).
+    - Nhận ảnh trực tiếp từ client (multipart/form-data).
+    - Cache kết quả lên R2 theo nội dung ảnh + tham số.
+    """
+    # Validate tham số cơ bản
+    if task not in ("upscale", "upscale+face_restore"):
+        raise HTTPException(422, "task must be 'upscale' or 'upscale+face_restore'")
+    if upscale not in (2, 3, 4):
+        raise HTTPException(422, "upscale must be 2, 3, or 4")
+    if tile < 0:
+        raise HTTPException(422, "tile must be >= 0")
+    if not (0.0 <= codeformer_fidelity <= 1.0):
+        raise HTTPException(422, "codeformer_fidelity must be in [0, 1]")
 
-    img_bytes, meta = await call_sdxl_turbo(
-        str(req.image_url),
-        req.style,
-        req.strength,
-        req.steps,
-        req.cfg,
-        req.negative_prompt,
-    )
+    # Đọc file ảnh
+    try:
+        img_bytes = await image.read()
+    except Exception:
+        raise HTTPException(400, "Cannot read uploaded file")
+    if not img_bytes:
+        raise HTTPException(400, "Empty image file")
 
-    key = make_inference_key(
-        task="stylize",
-        source_url=str(req.image_url),
-        style=req.style,
-        params={"strength": req.strength, "steps": req.steps, "cfg": req.cfg},
+    content_type = image.content_type or "image/jpeg"
+
+    # Gọi HF endpoint
+    try:
+        out_bytes, meta = await call_restore_from_bytes(
+            img_bytes,
+            content_type=content_type,
+            task=task,
+            upscale=upscale,
+            tile=tile,
+            codeformer_fidelity=codeformer_fidelity,
+            background_enhance=background_enhance,
+            face_upsample=face_upsample,
+        )
+    except InferenceError as e:
+        raise HTTPException(502, f"Inference failed: {e}")
+    except Exception as e:
+        raise HTTPException(500, f"Unexpected error: {e}")
+
+    # Cache lên R2
+    key = make_inference_key_from_bytes(
+        task="restore",
+        image_bytes=img_bytes,
+        params={
+            "task": task,
+            "upscale": upscale,
+            "tile": tile,
+            "codeformer_fidelity": codeformer_fidelity,
+            "background_enhance": background_enhance,
+            "face_upsample": face_upsample,
+        },
         ext="png",
     )
     url, key, hit = get_or_put_cached(
-        data=img_bytes,
+        data=out_bytes,
         key=key,
         content_type=meta.get("content_type", "image/png"),
-        metadata={"model": "sdxl-turbo", "style": req.style},
+        metadata={"model": "realesrgan+codeformer", "task": task},
     )
-    meta.update(
-        {"r2_key": key, "cache_hit": hit, "model": "sdxl-turbo", "style": req.style}
-    )
-    return StylizeResp(output_url=url, meta=meta)
+    meta.update({"r2_key": key, "cache_hit": hit, "model": "realesrgan+codeformer"})
+
+    return RestoreResp(output_url=url, meta=meta)

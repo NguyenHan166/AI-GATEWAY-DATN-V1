@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field, HttpUrl
-from typing import Optional, List, Dict, Literal
+from pydantic import BaseModel, Field, HttpUrl, AnyUrl
+from typing import Optional, List, Dict, Literal, Any
 
 
 class PresetFile(BaseModel):
@@ -34,6 +34,15 @@ class PresignResp(BaseModel):
     expires_in: int
 
 
+class ManifestPaged(BaseModel):
+    version: str
+    packs: List[Pack] = Field(default_factory=list)
+    total_packs: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
 # Models cho Inference API
 
 StyleName = Literal[
@@ -59,3 +68,19 @@ class StylizeReq(BaseModel):
 class StylizeResp(BaseModel):
     output_url: HttpUrl
     meta: Dict
+
+
+# ----- Restore (multipart route trả JSON này) -----
+class RestoreResp(BaseModel):
+    output_url: AnyUrl
+    meta: Dict[str, Any]
+
+
+# ----- Presign -----
+class PresignReq(BaseModel):
+    key: str = Field(..., description="Object key trong R2")
+
+
+class PresignResp(BaseModel):
+    url: AnyUrl
+    expires_in: int
