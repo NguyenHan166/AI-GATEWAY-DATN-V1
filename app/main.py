@@ -32,6 +32,7 @@ from .security import require_api_key
 from .ai_service.manifest_service import get_manifest_cached, filter_packs, paginate
 from .ai_service.inference_service import (
     call_restore_from_bytes,
+    call_remove_bg_from_bytes,
     InferenceError,
 )
 
@@ -224,4 +225,62 @@ async def restore_multipart(
     )
     meta.update({"r2_key": key, "cache_hit": hit, "model": "realesrgan+codeformer"})
 
+    return RestoreResp(output_url=url, meta=meta)
+
+
+# ---------------------------------------------------------------------
+# THÊM ENDPOINT MỚI NÀY
+# ---------------------------------------------------------------------
+@app.post("/inference/remove_bg", response_model=RestoreResp)  # Tái sử dụng RestoreResp
+@limiter.limit("30/minute")  # Giữ rate limit
+async def remove_bg_multipart(
+    request: Request,
+    authorized=Depends(require_api_key),  # Giữ bảo mật
+    image: UploadFile = File(..., description="Ảnh upload từ client (jpg/png/webp)"),
+):
+    """
+    Tách nền ảnh (Background Removal) sử dụng briaai/RMBG-1.4.
+    - Nhận ảnh trực tiếp từ client (multipart/form-data).
+    - Cache kết quả (ảnh PNG) lên R2.
+    """
+
+    # 1. Đọc file ảnh
+    try:
+        img_bytes = await image.read()
+    except Exception:
+        raise HTTPException(400, "Cannot read uploaded file")
+    if not img_bytes:
+        raise HTTPException(400, "Empty image file")
+
+    # 2. Gọi HF endpoint (hàm mới)
+    try:
+        out_bytes, meta = await call_remove_bg_from_bytes(img_bytes)
+
+    except InferenceError as e:
+        raise HTTPException(502, f"Inference failed: {e}")
+    except Exception as e:
+        raise HTTPException(500, f"Unexpected error: {e}")
+
+    # 3. Cache lên R2
+    # Key cache chỉ dựa trên hash của ảnh và tên tác vụ
+    key = make_inference_key_from_bytes(
+        task="remove_bg",
+        image_bytes=img_bytes,
+        params=None,  # Không có tham số nào khác
+        ext="png",  # Output luôn là PNG
+    )
+
+    # Hàm này sẽ upload nếu chưa có, hoặc lấy link nếu đã có
+    url, key, hit = get_or_put_cached(
+        data=out_bytes,
+        key=key,
+        content_type="image/png",  # Rất quan trọng
+        metadata={"model": "briaai/RMBG-1.4", "task": "remove_bg"},
+    )
+
+    meta.update(
+        {"r2_key": key, "cache_hit": hit, "model": meta.get("model", "briaai/RMBG-1.4")}
+    )
+
+    # 4. Trả về response (tái sử dụng model RestoreResp)
     return RestoreResp(output_url=url, meta=meta)

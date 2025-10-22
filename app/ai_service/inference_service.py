@@ -2,7 +2,12 @@ import base64
 from typing import Tuple, Dict, Any
 import httpx
 
-from ..config import HF_ENDPOINT_URL_RESTORE, HF_TOKEN, INFERENCE_TIMEOUT_SEC
+from ..config import (
+    HF_ENDPOINT_URL_RESTORE,
+    HF_TOKEN,
+    INFERENCE_TIMEOUT_SEC,
+    HF_ENDPOINT_URL_REMOVE_BG,
+)
 
 
 class InferenceError(RuntimeError):
@@ -100,3 +105,65 @@ async def call_restore_from_bytes(
     meta.setdefault("background_enhance", background_enhance)
     meta.setdefault("face_upsample", face_upsample)
     return out_bytes, meta
+
+
+# ---------------------------------------------------------------------
+# THÊM HÀM MỚI NÀY
+# ---------------------------------------------------------------------
+async def call_remove_bg_from_bytes(img_bytes: bytes) -> tuple[bytes, dict]:
+    """
+    Gọi Hugging Face Endpoint cho tác vụ remove background (briaai/RMBG-1.4).
+    Handler này nhận JSON {"image": "base64..."}
+    Và trả về JSON {"image": "base64...", "meta": {...}}
+    """
+    if not HF_ENDPOINT_URL_REMOVE_BG:
+        raise InferenceError("HF_ENDPOINT_URL_REMOVE_BG is not configured")
+    if not HF_TOKEN:
+        raise InferenceError("HF_TOKEN is not configured")
+
+    headers = {
+        "Authorization": f"Bearer {HF_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+    # 1. Chuyển image bytes -> base64 string
+    b64_img = base64.b64encode(img_bytes).decode("utf-8")
+
+    # 2. Chuẩn bị payload
+    payload = {"inputs": b64_img}
+
+    # 3. Gọi API
+    async with httpx.AsyncClient(timeout=INFERENCE_TIMEOUT_SEC) as client:
+        try:
+            response = await client.post(
+                HF_ENDPOINT_URL_REMOVE_BG,
+                json=payload,
+                headers=headers,
+            )
+            response.raise_for_status()  # Ném lỗi nếu status là 4xx/5xx
+
+        except httpx.RequestError as e:
+            raise InferenceError(f"HTTP request failed: {e}")
+        except Exception as e:
+            raise InferenceError(f"An unexpected error occurred: {e}")
+
+    # 4. Xử lý kết quả
+    try:
+        data = response.json()
+        if "error" in data:
+            raise InferenceError(f"HF Endpoint returned an error: {data['error']}")
+
+        out_b64 = data.get("image")
+        if not out_b64:
+            raise InferenceError("No 'image' key in HF response")
+
+        # 5. Decode base64 (ảnh PNG) -> bytes
+        out_bytes = base64.b64decode(out_b64)
+
+        meta = data.get("meta", {})
+        meta["content_type"] = "image/png"  # Output luôn là PNG (có alpha)
+
+        return out_bytes, meta
+
+    except Exception as e:
+        raise InferenceError(f"Failed to parse HF response: {e}")

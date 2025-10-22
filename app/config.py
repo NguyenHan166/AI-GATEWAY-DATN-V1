@@ -36,6 +36,8 @@ STYLE_MAX_SIDE = int(os.getenv("STYLE_MAX_SIDE", "1024"))
 
 # Hugging Face
 HF_ENDPOINT_URL_RESTORE = os.getenv("HF_ENDPOINT_URL_RESTORE")
+# Thêm dòng này cùng với các HF_ENDPOINT khác
+HF_ENDPOINT_URL_REMOVE_BG = os.getenv("HF_ENDPOINT_URL_REMOVE_BG")
 HF_TOKEN = os.getenv("HF_TOKEN")
 INFERENCE_TIMEOUT_SEC = int(os.getenv("INFERENCE_TIMEOUT_SEC", "90"))
 
