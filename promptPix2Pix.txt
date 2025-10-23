@@ -1,0 +1,68 @@
+1. Thay đổi Phong cách Nghệ thuật (Artistic Styles) 🎨
+Đây là các phong cách hội họa "cổ điển" mà model làm rất tốt:
+
+Tranh màu nước: make it a watercolor painting
+
+Tranh sơn dầu: turn it into an oil painting
+
+Tranh phác thảo (chì/than): turn it into a pencil sketch (hoặc a charcoal sketch)
+
+Phong cách Van Gogh: paint this in the style of Van Gogh
+
+Nghệ thuật Pop Art: make it look like pop art
+
+Tranh khảm: turn this into a mosaic
+
+2. Thay đổi Môi trường & Không khí 🌧️
+Đây là một trong những điểm mạnh nhất của model:
+
+Thời tiết (Mưa): make it look like it's raining
+
+Thời tiết (Tuyết): turn this scene into a winter landscape with snow
+
+Thời gian (Hoàng hôn): change the time to a beautiful sunset
+
+Thời gian (Ban đêm): make it nighttime (hoặc add a starry sky)
+
+Không khí (Sương mù): add fog to the scene
+
+Không khí (Kịch tính/Điện ảnh): apply a cinematic look with dramatic lighting
+
+Bối cảnh (Trên sao Hỏa): make it look like it is on Mars
+
+3. Thay đổi Vật liệu & Kết cấu (Materials) 🧊
+Đây là tính năng "gây sốt" nhất. Bạn có thể cho phép người dùng chọn một vật thể (hoặc toàn bộ ảnh) và biến nó thành:
+
+Vàng: turn the [object] into solid gold (ví dụ: turn the statue into solid gold)
+
+Gỗ: make the [object] out of wood (ví dụ: make the car out of wood)
+
+Thủy tinh: turn it into a glass sculpture
+
+Băng: turn it into an ice sculpture
+
+Robot: make this dog a robot (hoặc make this person a cyborg)
+
+Đá cẩm thạch: make it look like it's made of marble
+
+4. Thêm/Thay đổi Chi tiết Đơn giản 💡
+Thêm vào bầu trời: add fireworks to the sky (hoặc add clouds)
+
+Thay đổi màu tóc: change her hair color to pink
+
+Thêm lửa: set the [object] on fire (ví dụ: set the car on fire)
+
+Thêm hoa: cover the grass with flowers
+
+Làm cũ đi: make it look old and worn
+
+5. "Filter" Nâng cao
+Thay vì các filter màu đơn giản, bạn có thể dùng các prompt này:
+
+HDR/Sống động: apply an HDR effect
+
+Film cổ: make it look like a vintage film photo
+
+Ảo giác (Psychedelic): make it look psychedelic
+
+Tối/Ma mị (Dark/Moody): make it look dark and moody

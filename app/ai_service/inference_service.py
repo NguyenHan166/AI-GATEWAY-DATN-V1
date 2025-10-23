@@ -7,6 +7,7 @@ from ..config import (
     HF_TOKEN,
     INFERENCE_TIMEOUT_SEC,
     HF_ENDPOINT_URL_REMOVE_BG,
+    HF_ENDPOINT_URL_INSTRUCTPIX2PIX,
 )
 
 
@@ -162,6 +163,78 @@ async def call_remove_bg_from_bytes(img_bytes: bytes) -> tuple[bytes, dict]:
 
         meta = data.get("meta", {})
         meta["content_type"] = "image/png"  # Output luôn là PNG (có alpha)
+
+        return out_bytes, meta
+
+    except Exception as e:
+        raise InferenceError(f"Failed to parse HF response: {e}")
+
+
+async def call_edit_by_text_from_bytes(
+    img_bytes: bytes,
+    prompt: str,
+    num_inference_steps: int = 20,
+    image_guidance_scale: float = 1.5,
+    guidance_scale: float = 7.0,
+) -> tuple[bytes, dict]:
+    """
+    Gọi Hugging Face Endpoint cho tác vụ InstructPix2Pix.
+    Handler này nhận JSON {"inputs": "base64...", "prompt": "..."}
+    Và trả về JSON {"image": "base64...", "meta": {...}}
+    """
+    if not HF_ENDPOINT_URL_INSTRUCTPIX2PIX:
+        raise InferenceError("HF_ENDPOINT_URL_INSTRUCTPIX2PIX is not configured")
+    if not HF_TOKEN:
+        raise InferenceError("HF_TOKEN is not configured")
+
+    headers = {
+        "Authorization": f"Bearer {HF_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+    # 1. Chuyển image bytes -> base64 string
+    # Chúng ta dùng key "inputs" để nhất quán với hàm remove_bg
+    b64_img = base64.b64encode(img_bytes).decode("utf-8")
+
+    # 2. Chuẩn bị payload (bao gồm ảnh và các tham số)
+    payload = {
+        "inputs": b64_img,  # Key "inputs" cho ảnh
+        "prompt": prompt,
+        "num_inference_steps": num_inference_steps,
+        "image_guidance_scale": image_guidance_scale,
+        "guidance_scale": guidance_scale,
+    }
+
+    # 3. Gọi API
+    async with httpx.AsyncClient(timeout=INFERENCE_TIMEOUT_SEC) as client:
+        try:
+            response = await client.post(
+                HF_ENDPOINT_URL_INSTRUCTPIX2PIX,
+                json=payload,
+                headers=headers,
+            )
+            response.raise_for_status()  # Ném lỗi nếu status là 4xx/5xx
+
+        except httpx.RequestError as e:
+            raise InferenceError(f"HTTP request failed: {e}")
+        except Exception as e:
+            raise InferenceError(f"An unexpected error occurred: {e}")
+
+    # 4. Xử lý kết quả
+    try:
+        data = response.json()
+        if "error" in data:
+            raise InferenceError(f"HF Endpoint returned an error: {data['error']}")
+
+        out_b64 = data.get("image")
+        if not out_b64:
+            raise InferenceError("No 'image' key in HF response")
+
+        # 5. Decode base64 (ảnh PNG) -> bytes
+        out_bytes = base64.b64decode(out_b64)
+
+        meta = data.get("meta", {})
+        meta["content_type"] = "image/png"  # Output luôn là PNG
 
         return out_bytes, meta
 

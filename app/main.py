@@ -33,6 +33,7 @@ from .ai_service.manifest_service import get_manifest_cached, filter_packs, pagi
 from .ai_service.inference_service import (
     call_restore_from_bytes,
     call_remove_bg_from_bytes,
+    call_edit_by_text_from_bytes,
     InferenceError,
 )
 
@@ -280,6 +281,89 @@ async def remove_bg_multipart(
 
     meta.update(
         {"r2_key": key, "cache_hit": hit, "model": meta.get("model", "briaai/RMBG-1.4")}
+    )
+
+    # 4. Trả về response (tái sử dụng model RestoreResp)
+    return RestoreResp(output_url=url, meta=meta)
+
+
+@app.post(
+    "/inference/edit_by_text", response_model=RestoreResp
+)  # Tái sử dụng RestoreResp
+@limiter.limit("20/minute")  # Model này chạy chậm, giới hạn chặt hơn
+async def edit_by_text_multipart(
+    request: Request,
+    authorized=Depends(require_api_key),
+    image: UploadFile = File(..., description="Ảnh gốc (jpg/png/webp)"),
+    prompt: str = Form(..., description="Chỉ dẫn chỉnh sửa, ví dụ: 'make it a robot'"),
+    num_inference_steps: int = Form(20),
+    image_guidance_scale: float = Form(1.5),
+    guidance_scale: float = Form(7.0),
+):
+    """
+    Chỉnh sửa ảnh bằng chỉ dẫn văn bản (InstructPix2Pix).
+    - Nhận ảnh (multipart) và prompt (form data) từ client.
+    - Cache kết quả (ảnh PNG) lên R2.
+    """
+
+    # 1. Đọc file ảnh
+    try:
+        img_bytes = await image.read()
+    except Exception:
+        raise HTTPException(400, "Cannot read uploaded file")
+    if not img_bytes:
+        raise HTTPException(400, "Empty image file")
+    if not prompt:
+        raise HTTPException(422, "Prompt cannot be empty")
+
+    # 2. Gọi HF endpoint (hàm mới)
+    try:
+        out_bytes, meta = await call_edit_by_text_from_bytes(
+            img_bytes=img_bytes,
+            prompt=prompt,
+            num_inference_steps=num_inference_steps,
+            image_guidance_scale=image_guidance_scale,
+            guidance_scale=guidance_scale,
+        )
+
+    except InferenceError as e:
+        raise HTTPException(502, f"Inference failed: {e}")
+    except Exception as e:
+        raise HTTPException(500, f"Unexpected error: {e}")
+
+    # 3. Cache lên R2
+    # Key cache phải bao gồm cả hash ảnh VÀ các tham số
+    params = {
+        "prompt": prompt,
+        "steps": num_inference_steps,
+        "img_guidance": image_guidance_scale,
+        "guidance": guidance_scale,
+    }
+
+    key = make_inference_key_from_bytes(
+        task="edit_by_text",
+        image_bytes=img_bytes,
+        params=params,  # Rất quan trọng để cache chính xác
+        ext="png",  # Output luôn là PNG
+    )
+
+    url, key, hit = get_or_put_cached(
+        data=out_bytes,
+        key=key,
+        content_type="image/png",
+        metadata={
+            "model": "timbrooks/instruct-pix2pix",
+            "task": "edit_by_text",
+            **params,
+        },
+    )
+
+    meta.update(
+        {
+            "r2_key": key,
+            "cache_hit": hit,
+            "model": meta.get("model", "timbrooks/instruct-pix2pix"),
+        }
     )
 
     # 4. Trả về response (tái sử dụng model RestoreResp)
