@@ -1,5 +1,5 @@
 import base64
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, List, Any, Optional
 import httpx
 
 from ..config import (
@@ -8,6 +8,7 @@ from ..config import (
     INFERENCE_TIMEOUT_SEC,
     HF_ENDPOINT_URL_REMOVE_BG,
     HF_ENDPOINT_URL_INSTRUCTPIX2PIX,
+    HF_ENDPOINT_URL_QWEN_EDIT,
 )
 
 
@@ -240,3 +241,75 @@ async def call_edit_by_text_from_bytes(
 
     except Exception as e:
         raise InferenceError(f"Failed to parse HF response: {e}")
+
+
+# ---------------------------------------------------------------------
+# THÊM HÀM MỚI CHO QWEN IMAGE EDIT
+async def call_qwen_edit_from_bytes(
+    prompt: str,
+    image_bytes_list: List[bytes],
+    num_inference_steps: int = 20,
+    guidance_scale: float = 7.0,
+) -> Tuple[bytes, Dict[str, Any]]:
+    """
+    Gọi Qwen-Image-Edit-2509 endpoint với 1-3 ảnh và prompt.
+    """
+    if not HF_ENDPOINT_URL_QWEN_EDIT:
+        raise InferenceError("HF_ENDPOINT_URL_QWEN_EDIT is not configured")
+    if not HF_TOKEN:
+        raise InferenceError("HF_TOKEN is not configured")
+    if not image_bytes_list:
+        raise InferenceError("No images provided")
+
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+
+    # Xây dựng payload JSON theo yêu cầu của handler.py
+    payload = {
+        "prompt": prompt,
+        "parameters": {  # Các tham số nên lồng trong "parameters"
+            "num_inference_steps": num_inference_steps,
+            "guidance_scale": guidance_scale,
+        },
+    }
+
+    # Mã hóa Base64 và thêm ảnh vào payload
+    # handler.py của chúng ta chấp nhận key: image_1, image_2, image_3
+    for i, img_bytes in enumerate(image_bytes_list):
+        if i >= 3:  # Giới hạn 3 ảnh
+            break
+        b64_image = base64.b64encode(img_bytes).decode("utf-8")
+        payload[f"image_{i+1}"] = b64_image  # image_1, image_2, ...
+
+    # Gọi API
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(
+                HF_ENDPOINT_URL_QWEN_EDIT,
+                headers=headers,
+                json=payload,
+                timeout=INFERENCE_TIMEOUT_SEC,
+            )
+            resp.raise_for_status()  # Báo lỗi nếu status code là 4xx hoặc 5xx
+
+            # Giải mã kết quả (handler.py trả về JSON {"image": "...", "meta": ...})
+            json_resp = resp.json()
+            if "error" in json_resp:
+                raise InferenceError(json_resp["error"])
+
+            # Giải mã ảnh base64 trả về
+            out_b64 = json_resp.get("image")
+            if not out_b64:
+                raise InferenceError("No 'image' field in successful response")
+
+            out_bytes = base64.b64decode(out_b64)
+            meta = json_resp.get("meta", {})
+            meta["content_type"] = "image/png"  # Model Qwen luôn trả về PNG
+
+            return out_bytes, meta
+
+        except httpx.HTTPStatusError as e:
+            raise InferenceError(
+                f"HTTP error: {e.response.status_code} - {e.response.text}"
+            )
+        except httpx.RequestError as e:
+            raise InferenceError(f"Request failed: {e}")

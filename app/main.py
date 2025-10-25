@@ -26,6 +26,7 @@ from .models import (
     StylizeResp,
     ManifestPaged,
     RestoreResp,
+    EditResp,
 )
 from .storage import presign_get, get_or_put_cached, make_inference_key_from_bytes
 from .security import require_api_key
@@ -34,8 +35,10 @@ from .ai_service.inference_service import (
     call_restore_from_bytes,
     call_remove_bg_from_bytes,
     call_edit_by_text_from_bytes,
+    call_qwen_edit_from_bytes,
     InferenceError,
 )
+from typing import List, Optional
 
 limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(title="Filters Backend (Cloudflare R2)")
@@ -367,4 +370,98 @@ async def edit_by_text_multipart(
     )
 
     # 4. Trả về response (tái sử dụng model RestoreResp)
+    return RestoreResp(output_url=url, meta=meta)
+
+
+# ---------- QWEN: Multi-image Edit (multipart) ----------
+# ---- Inference: Qwen-Image-Edit (multipart upload) ----
+@app.post("/inference/edit_qwen", response_model=RestoreResp)
+@limiter.limit("30/minute")
+async def edit_qwen_multipart(
+    request: Request,
+    authorized=Depends(require_api_key),
+    # Tham số Form
+    prompt: str = Form(..., description="Câu lệnh chỉnh sửa ảnh"),
+    num_inference_steps: int = Form(20),
+    guidance_scale: float = Form(7.0),
+    # Tham số File (hỗ trợ đa ảnh)
+    image_1: UploadFile = File(..., description="Ảnh đầu vào chính (jpg/png/webp)"),
+    image_2: Optional[UploadFile] = File(None, description="Ảnh phụ 1 (nếu có)"),
+    image_3: Optional[UploadFile] = File(None, description="Ảnh phụ 2 (nếu có)"),
+):
+    """
+    Chỉnh sửa ảnh bằng Qwen-Image-Edit-2509 (đa ảnh).
+    - Nhận 1-3 ảnh và 1 prompt (multipart/form-data).
+    - Cache kết quả lên R2.
+    """
+
+    # ---- 1. Đọc và xác thực ảnh ----
+    image_bytes_list: List[bytes] = []
+    content_type_list: List[str] = []
+
+    try:
+        # Ảnh 1 (bắt buộc)
+        img1_bytes = await image_1.read()
+        if not img1_bytes:
+            raise HTTPException(400, "image_1 is empty")
+        image_bytes_list.append(img1_bytes)
+        content_type_list.append(image_1.content_type or "image/jpeg")
+
+        # Ảnh 2 (tùy chọn)
+        if image_2:
+            img2_bytes = await image_2.read()
+            if img2_bytes:
+                image_bytes_list.append(img2_bytes)
+                content_type_list.append(image_2.content_type or "image/jpeg")
+
+        # Ảnh 3 (tùy chọn)
+        if image_3:
+            img3_bytes = await image_3.read()
+            if img3_bytes:
+                image_bytes_list.append(img3_bytes)
+                content_type_list.append(image_3.content_type or "image/jpeg")
+
+    except Exception:
+        raise HTTPException(400, "Cannot read uploaded file(s)")
+
+    # ---- 2. Gọi HF endpoint ----
+    try:
+        out_bytes, meta = await call_qwen_edit_from_bytes(
+            prompt=prompt,
+            image_bytes_list=image_bytes_list,
+            num_inference_steps=num_inference_steps,
+            guidance_scale=guidance_scale,
+        )
+    except InferenceError as e:
+        raise HTTPException(502, f"Inference failed: {e}")
+    except Exception as e:
+        raise HTTPException(500, f"Unexpected error: {e}")
+
+    # ---- 3. Cache kết quả lên R2 ----
+
+    # Tạo key cache duy nhất dựa trên NỘI DUNG của tất cả ảnh + tham số
+    combined_image_bytes = b"".join(image_bytes_list)
+
+    key = make_inference_key_from_bytes(
+        task="qwen_edit",
+        image_bytes=combined_image_bytes,  # Hash tổng hợp
+        params={
+            "prompt": prompt,
+            "steps": num_inference_steps,
+            "scale": guidance_scale,
+            "num_images": len(image_bytes_list),
+        },
+        ext="png",  # Qwen luôn trả về PNG
+    )
+
+    url, key, hit = get_or_put_cached(
+        data=out_bytes,
+        key=key,
+        content_type=meta.get("content_type", "image/png"),
+        metadata={"model": "qwen-image-edit-2509", "prompt": prompt},
+    )
+
+    meta.update({"r2_key": key, "cache_hit": hit, "model": "qwen-image-edit-2509"})
+
+    # Tái sử dụng model RestoreResp vì nó có output_url và meta
     return RestoreResp(output_url=url, meta=meta)
