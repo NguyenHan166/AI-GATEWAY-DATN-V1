@@ -1,6 +1,9 @@
 import base64
 from typing import Tuple, Dict, List, Any, Optional
 import httpx
+import logging
+from PIL import Image
+import io
 
 from ..config import (
     HF_ENDPOINT_URL_RESTORE,
@@ -8,7 +11,7 @@ from ..config import (
     INFERENCE_TIMEOUT_SEC,
     HF_ENDPOINT_URL_REMOVE_BG,
     HF_ENDPOINT_URL_INSTRUCTPIX2PIX,
-    HF_ENDPOINT_URL_QWEN_EDIT,
+    HF_ENDPOINT_URL_ARCANE_STYLE,
 )
 
 
@@ -243,73 +246,150 @@ async def call_edit_by_text_from_bytes(
         raise InferenceError(f"Failed to parse HF response: {e}")
 
 
-# ---------------------------------------------------------------------
-# THÊM HÀM MỚI CHO QWEN IMAGE EDIT
-async def call_qwen_edit_from_bytes(
+# Thiết lập logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+
+async def call_arcane_style_from_bytes(
+    img_bytes: bytes,
     prompt: str,
-    image_bytes_list: List[bytes],
+    strength: float = 0.75,
     num_inference_steps: int = 20,
-    guidance_scale: float = 7.0,
+    guidance_scale: float = 7.5,
 ) -> Tuple[bytes, Dict[str, Any]]:
     """
-    Gọi Qwen-Image-Edit-2509 endpoint với 1-3 ảnh và prompt.
+    Gọi Hugging Face Endpoint cho tác vụ style transfer với nitrosocke/Arcane-Diffusion.
+    Handler nhận JSON {"inputs": "base64...", "prompt": "...", "strength": ..., "num_inference_steps": ..., "guidance_scale": ...}
+    Trả về JSON {"image": "base64...", "meta": {...}}, chuỗi base64 thô, hoặc JSON chuỗi trực tiếp.
+    Args:
+        img_bytes: Bytes của ảnh gốc
+        prompt: Văn bản mô tả phong cách (e.g., "a character in Arcane style, vibrant colors")
+        strength: Độ thay đổi phong cách [0.0-1.0]
+        num_inference_steps: Số bước inference [10-50]
+        guidance_scale: Độ ảnh hưởng của prompt [1.0-20.0]
+    Returns:
+        Tuple chứa bytes của ảnh output và metadata
     """
-    if not HF_ENDPOINT_URL_QWEN_EDIT:
-        raise InferenceError("HF_ENDPOINT_URL_QWEN_EDIT is not configured")
+    if not HF_ENDPOINT_URL_ARCANE_STYLE:
+        raise InferenceError("HF_ENDPOINT_URL_ARCANE_STYLE is not configured")
     if not HF_TOKEN:
         raise InferenceError("HF_TOKEN is not configured")
-    if not image_bytes_list:
-        raise InferenceError("No images provided")
 
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    # Kiểm tra ảnh đầu vào
+    try:
+        img = Image.open(io.BytesIO(img_bytes))
+        img.verify()  # Xác minh ảnh hợp lệ
+        img.close()
+    except Exception as e:
+        raise InferenceError(f"Invalid input image: {e}")
 
-    # Xây dựng payload JSON theo yêu cầu của handler.py
-    payload = {
-        "prompt": prompt,
-        "parameters": {  # Các tham số nên lồng trong "parameters"
-            "num_inference_steps": num_inference_steps,
-            "guidance_scale": guidance_scale,
-        },
+    headers = {
+        "Authorization": f"Bearer {HF_TOKEN}",
+        "Content-Type": "application/json",
     }
 
-    # Mã hóa Base64 và thêm ảnh vào payload
-    # handler.py của chúng ta chấp nhận key: image_1, image_2, image_3
-    for i, img_bytes in enumerate(image_bytes_list):
-        if i >= 3:  # Giới hạn 3 ảnh
-            break
-        b64_image = base64.b64encode(img_bytes).decode("utf-8")
-        payload[f"image_{i+1}"] = b64_image  # image_1, image_2, ...
+    # 1. Chuyển image bytes -> base64 string
+    b64_img = base64.b64encode(img_bytes).decode("utf-8")
 
-    # Gọi API
-    async with httpx.AsyncClient() as client:
+    # 2. Chuẩn bị payload
+    payload = {
+        "inputs": b64_img,
+        "prompt": prompt,
+        "strength": strength,
+        "num_inference_steps": num_inference_steps,
+        "guidance_scale": guidance_scale,
+    }
+
+    # 3. Gọi API
+    async with httpx.AsyncClient(timeout=INFERENCE_TIMEOUT_SEC) as client:
         try:
-            resp = await client.post(
-                HF_ENDPOINT_URL_QWEN_EDIT,
-                headers=headers,
+            response = await client.post(
+                HF_ENDPOINT_URL_ARCANE_STYLE,
                 json=payload,
-                timeout=INFERENCE_TIMEOUT_SEC,
+                headers=headers,
             )
-            resp.raise_for_status()  # Báo lỗi nếu status code là 4xx hoặc 5xx
+            response.raise_for_status()  # Ném lỗi nếu status là 4xx/5xx
 
-            # Giải mã kết quả (handler.py trả về JSON {"image": "...", "meta": ...})
-            json_resp = resp.json()
-            if "error" in json_resp:
-                raise InferenceError(json_resp["error"])
-
-            # Giải mã ảnh base64 trả về
-            out_b64 = json_resp.get("image")
-            if not out_b64:
-                raise InferenceError("No 'image' field in successful response")
-
-            out_bytes = base64.b64decode(out_b64)
-            meta = json_resp.get("meta", {})
-            meta["content_type"] = "image/png"  # Model Qwen luôn trả về PNG
-
-            return out_bytes, meta
-
-        except httpx.HTTPStatusError as e:
-            raise InferenceError(
-                f"HTTP error: {e.response.status_code} - {e.response.text}"
-            )
         except httpx.RequestError as e:
-            raise InferenceError(f"Request failed: {e}")
+            logger.error(f"HTTP request failed: {e}")
+            raise InferenceError(f"HTTP request failed: {e}")
+        except httpx.HTTPStatusError as e:
+            logger.error(
+                f"HF endpoint failed: {e.response.status_code} {e.response.text[:300]}"
+            )
+            raise InferenceError(
+                f"HF endpoint failed: {e.response.status_code} {e.response.text[:300]}"
+            )
+
+    # 4. Xử lý kết quả
+    try:
+        content_type = response.headers.get("content-type", "").lower()
+        logger.debug(f"Response Content-Type: {content_type}")
+        logger.debug(f"Response Text (first 300 chars): {response.text[:300]}")
+
+        if "application/json" in content_type:
+            data = response.json()
+            if isinstance(data, str):
+                # Response JSON là chuỗi base64 trực tiếp
+                out_b64 = data.strip()
+                meta = {}
+            else:
+                # Response JSON là object
+                if "error" in data:
+                    logger.error(f"HF Endpoint error: {data['error']}")
+                    raise InferenceError(
+                        f"HF Endpoint returned an error: {data['error']}"
+                    )
+                out_b64 = data.get("image") or data.get("outputs") or data.get("output")
+                if not out_b64:
+                    logger.error(
+                        "No 'image', 'outputs', or 'output' key in HF JSON response"
+                    )
+                    raise InferenceError(
+                        "No 'image', 'outputs', or 'output' key in HF JSON response"
+                    )
+                meta = data.get("meta", {})
+        else:
+            # Response là chuỗi base64 thô hoặc binary
+            out_b64 = response.text.strip()
+            meta = {}
+
+        # 5. Kiểm tra và decode base64
+        if not out_b64:
+            logger.error("Empty base64 string received from HF endpoint")
+            raise InferenceError("Empty base64 string received from HF endpoint")
+
+        try:
+            out_bytes = base64.b64decode(out_b64)
+        except Exception as e:
+            logger.error(f"Failed to decode base64: {e}")
+            raise InferenceError(f"Failed to decode base64: {e}")
+
+        # 6. Đảm bảo ảnh là PNG hợp lệ
+        try:
+            img = Image.open(io.BytesIO(out_bytes))
+            img.verify()  # Xác minh ảnh hợp lệ
+            img = Image.open(io.BytesIO(out_bytes))  # Mở lại để xử lý
+            if img.mode != "RGB":
+                img = img.convert("RGB")
+            output_buffer = io.BytesIO()
+            img.save(output_buffer, format="PNG")
+            out_bytes = output_buffer.getvalue()
+        except Exception as e:
+            logger.error(f"Failed to process output image: {e}")
+            raise InferenceError(f"Failed to process output image: {e}")
+
+        # 7. Cập nhật metadata
+        meta["content_type"] = "image/png"
+        meta.setdefault("model", "nitrosocke/Arcane-Diffusion")
+        meta.setdefault("prompt", prompt)
+        meta.setdefault("strength", strength)
+        meta.setdefault("num_inference_steps", num_inference_steps)
+        meta.setdefault("guidance_scale", guidance_scale)
+
+        return out_bytes, meta
+
+    except Exception as e:
+        logger.error(f"Failed to parse HF response: {e}")
+        raise InferenceError(f"Failed to parse HF response: {e}")

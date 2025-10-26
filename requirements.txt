@@ -9,3 +9,4 @@ limits
 pyjwt
 python-dotenv
 httpx
+Pillow

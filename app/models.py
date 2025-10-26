@@ -84,10 +84,3 @@ class PresignReq(BaseModel):
 class PresignResp(BaseModel):
     url: AnyUrl
     expires_in: int
-
-
-class EditResp(BaseModel):
-    output_url: str = Field(..., description="R2 presigned URL của ảnh kết quả (PNG)")
-    meta: Dict[str, Optional[Union[str, int, float, bool]]] = Field(
-        default_factory=dict, description="Metadata từ model + cache info"
-    )
